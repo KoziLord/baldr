@@ -1,2 +1,2 @@
 # baldr
-data-oriented game engine for odin
+(one of the sons of odin)
