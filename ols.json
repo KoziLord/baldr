@@ -1,0 +1,16 @@
+{
+    "collections": [
+        {
+            "name": "core",
+            "path": "C:\\Users\\2darr\\Documents\\odin\\Odin\\core"
+        },
+        {
+            "name": "vendor",
+            "path": "C:\\Users\\2darr\\Documents\\odin\\Odin\\vendor"
+        }
+    ],
+    "enable_document_symbols": true,
+    "enable_semantic_tokens": false,
+    "enable_hover": true,
+    "enable_snippets": true
+}
