@@ -1,14 +1,20 @@
 package ecs
 
+import "../multiMap"
+
 import "core:fmt"
 import "core:math"
 
 @(private)
 int3 :: [3]int
 
+@(private)
+int2 :: [2]int
+
 BucketMap :: struct {
     cellSize: f64,
     buckets: map[int3][dynamic]EntityID,
+    buckets2: multiMap.MultiMap(int2, EntityID),
 }
 
 CreateBucketMap :: proc(cellSize: f64) -> ^BucketMap {

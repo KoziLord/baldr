@@ -2,6 +2,8 @@ package main
 
 import "ecs"
 import "queue"
+import "multiMap"
+
 import "core:fmt"
 import "core:thread"
 import "core:sync"
@@ -83,5 +85,32 @@ DequeueWorker :: proc(t: ^thread.Thread) {
             sync.atomic_add(&sum, value, .Sequentially_Consistent)
         }
     }
+}
+
+
+
+TestMultiMap :: proc() {
+    buckets := multiMap.Make(int2, int, 100)
+
+    for x in 0..5 {
+        for y in 0..5 {
+            for i in 0..<x {
+                multiMap.Add(buckets, int2 {x,y}, 10*i)
+            }
+        }
+    }
+
+    iterator := multiMap.MakeIterator(buckets, int2 {5,5})
+    defer free(iterator)
+
+    for multiMap.Iterate(iterator) {
+        fmt.printf("%v\n", iterator.value)
+    }
+
+    multiMap.Clear(buckets)
+
+    multiMap.Delete(buckets)
+
+    fmt.println("multi-map test complete")
 }
 

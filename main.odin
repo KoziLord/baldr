@@ -34,6 +34,7 @@ Health :: struct {
 main :: proc() {
     //TestECSStuff()
     //TestQueue()
+    //TestMultiMap()
 
     for i in 0..<teamCount {
         for j in 0..<boidsPerTeam {
