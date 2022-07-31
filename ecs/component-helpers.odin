@@ -41,8 +41,7 @@ AddComponent :: proc(entity: EntityID, component: $T) {
             RemoveComponentDataFromInstanceList(&oldArchetype.componentInstanceLists[i], entityInfo.indexInArchetype)
         }
 
-        oldArchetype.entityIDs[entityInfo.indexInArchetype] = oldArchetype.entityIDs[oldArchetype.count-1]
-        pop(&oldArchetype.entityIDs)
+        oldArchetype.entityIDs[entityInfo.indexInArchetype] = pop(&oldArchetype.entityIDs)
         oldArchetype.count -= 1
     }
 

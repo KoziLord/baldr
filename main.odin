@@ -12,17 +12,27 @@ import "core:strings"
 
 float2 :: [2]f64
 int2 :: [2]int
+Optional :: ecs.Optional
 
 teamCount :: 5
-boidsPerTeam :: 500
+boidsPerTeam :: 200
 CELL_SIZE :: 20.0
+
 
 boidBuckets : ^multiMap.MultiMap(int2, BucketPayload)
 
 Boid :: struct {
     speed: f64,
-    team: int,
+    shootTimer: int,
+    target: Optional(ecs.EntityID),
 }
+
+Bullet :: struct {
+    velocity: float2,
+    life: int,
+}
+
+TeamID :: distinct int
 
 Transform :: struct {
     position: float2,
@@ -32,44 +42,53 @@ Transform :: struct {
 BucketPayload :: struct {
     entity: ecs.EntityID,
     using transform: Transform,
+    team: TeamID,
 }
 
 Health :: struct {
-    health: f64,
+    health: int,
 }
 
 main :: proc() {
-    //TestECSStuff()
-    //TestQueue()
-    //TestMultiMap()
+    TestECSStuff()
+    TestQueue()
+    TestMultiMap()
 
     for i in 0..<teamCount {
         for j in 0..<boidsPerTeam {
             boid := ecs.NewEntity()
-            ecs.AddComponent(boid, Boid{
+            ecs.AddComponent(boid, Boid {
                 speed = 1,
-                team = i,
             })
+            ecs.AddComponent(boid, TeamID(i))
             ecs.AddComponent(boid, Transform {
                 position = GetSpawnPosition(i, j),
                 rotation = GetTeamRotation(i),
             })
             ecs.AddComponent(boid, Health {
-                health = 100,
+                health = 5,
             })
         }
     }
 
     boidBuckets = multiMap.Make(int2, BucketPayload, teamCount * boidsPerTeam * 2)
 
-    updateBoidsSystem := ecs.CreateSystem({Boid, Transform}, UpdateBoids)
+    updateBoidsSystem := ecs.CreateSystem({Boid, Transform, TeamID}, UpdateBoids)
+    updateBulletsSystem := ecs.CreateSystem({Bullet, Transform, TeamID}, UpdateBullets)
 
-    for i in 0..<2000 {
+    for {
         profiler.StartOfFrame()
 
-        ecs.RunSystem(updateBoidsSystem)
+        {
+            profiler.MeasureThisScope("Full Frame")
 
-        WriteWorldToConsole()
+            ecs.RunSystem(updateBoidsSystem)
+            ecs.RunSystem(updateBulletsSystem)
+    
+            ecs.PerformScheduledEntityDeletions()
+    
+            WriteWorldToConsole()
+        }
 
         profiler.EndOfFrame()
 
@@ -78,17 +97,19 @@ main :: proc() {
 }
 
 UpdateBoids :: proc(iterator: ^ecs.SystemIterator) {
-    profiler.MeasureThisScope()
+    profiler.MeasureThisScope("Boids System")
 
     {
         profiler.MeasureThisScope("Write Buckets")
         multiMap.Clear(boidBuckets)
         for ecs.Iterate(iterator) {
             transform := ecs.GetComponent(iterator, Transform)
+            team := ecs.GetComponent(iterator, TeamID)
             cell := GetBucketCell(transform.position)
             payload := BucketPayload {
                 entity = iterator.entity,
                 transform = transform^,
+                team = team^,
             }
             multiMap.Add(boidBuckets, cell, payload)
         }
@@ -97,13 +118,25 @@ UpdateBoids :: proc(iterator: ^ecs.SystemIterator) {
 
     
     {
-        profiler.MeasureThisScope("Iterate Buckets")
-
-        lookaheadDist := 10.0
+        profiler.MeasureThisScope("Update Boids")
         for ecs.Iterate(iterator) {
             entity := iterator.entity
             boid := ecs.GetComponent(iterator, Boid)
+            team := ecs.GetComponent(iterator, TeamID)
             transform := ecs.GetComponent(iterator, Transform)
+
+            if boid.target == nil {
+                boid.target = ecs.GetRandomEntity(iterator)
+                targetEntity, ok := boid.target.(ecs.EntityID)
+                if ok {
+                    targetTeam := ecs.GetComponent(targetEntity, TeamID)
+                    if targetTeam == team {
+                        boid.target = nil
+                    }
+                }
+            }
+        
+            lookaheadDist := 10.0
 
             forward := GetDirection(transform.rotation)
 
@@ -115,12 +148,11 @@ UpdateBoids :: proc(iterator: ^ecs.SystemIterator) {
             minCell := GetBucketCell(lookaheadPos - lookaheadDist)
             maxCell := GetBucketCell(lookaheadPos + lookaheadDist)
 
-            bucketIterator: multiMap.Iterator(int2, BucketPayload)
             for x in minCell.x..maxCell.x {
                 for y in minCell.y..maxCell.y {
                     cell := int2 {x,y}
-                    multiMap.SetupIterator(boidBuckets, cell, &bucketIterator)
-                    
+
+                    bucketIterator := multiMap.SetupIterator(boidBuckets, cell)
                     for multiMap.Iterate(&bucketIterator) {
                         payload := bucketIterator.value
                         if payload.entity != entity {
@@ -135,24 +167,102 @@ UpdateBoids :: proc(iterator: ^ecs.SystemIterator) {
                 //profiler.MeasureThisScope("Steering")
                 avgNearbyPos /= f64(nearbyCount)
                 delta := avgNearbyPos - transform.position
-                targetAngle := GetAngle(delta)
-                if targetAngle - transform.rotation > math.PI {
-                    targetAngle -= math.PI*2
-                }
-                if targetAngle - transform.rotation < -math.PI {
-                    targetAngle += math.PI*2
-                }
+                angleToGroup := GetAngle(delta)
                 
-                transform.rotation += (targetAngle - transform.rotation) * .005
+                transform.rotation += AngleDiff(angleToGroup, transform.rotation) * .005
+                
                 transform.rotation += rand.float64_range(-1, 1)*.1
                 
                 transform.rotation -= math.floor((transform.rotation + math.PI) / (math.PI*2)) * math.PI*2
             }
             
+            target, hasTarget := boid.target.(ecs.EntityID)
+            if hasTarget {
+                if ecs.IsNil(target) {
+                    boid.target = nil
+                } else {
+                    targetTransform := ecs.GetComponent(target, Transform)
+                    angleToTarget := GetAngle(targetTransform.position - transform.position)
+                    angleDiff := AngleDiff(angleToTarget, transform.rotation)
+                    transform.rotation += angleDiff * .005
+                    
+                    boid.shootTimer -= 1
+                    if boid.shootTimer <= 0 {
+                        if abs(angleDiff) < .1 {
+                            ShootBullet(transform.position, transform.rotation, team^)
+                            boid.shootTimer = 20
+                        }
+                    }
+                }
+            }
             
             transform.position += forward * boid.speed
         }
     }
+}
+
+UpdateBullets :: proc(iterator: ^ecs.SystemIterator) {
+    profiler.MeasureThisScope()
+    
+    deleteCount := 0
+    for ecs.Iterate(iterator) {
+        bullet := ecs.GetComponent(iterator, Bullet)
+        transform := ecs.GetComponent(iterator, Transform)
+        team := ecs.GetComponent(iterator, TeamID)^
+
+        minCell := GetBucketCell(Min(transform.position,
+                                     transform.position+bullet.velocity) - 2)
+        maxCell := GetBucketCell(Max(transform.position,
+                                     transform.position+bullet.velocity) + 2)
+        
+        bucketLoop:
+        for x in minCell.x .. maxCell.x {
+            for y in minCell.y .. maxCell.y {
+                cell := int2{x,y}
+                
+                bucketIterator := multiMap.SetupIterator(boidBuckets, cell)
+                for multiMap.Iterate(&bucketIterator) {
+                    payload := bucketIterator.value
+                    if payload.team != team {
+                        boidPos := payload.transform.position
+                        delta := boidPos - transform.position
+                        t := Dot(delta, bullet.velocity) / SqrLength(bullet.velocity)
+                        closePoint := transform.position + bullet.velocity*t
+                        deltaToClosePoint := closePoint - boidPos
+                        if SqrLength(deltaToClosePoint) < 1 {
+                            health := ecs.GetComponent(payload.entity, Health)
+                            health.health -= 1
+                            if health.health <= 0 {
+                                ecs.ScheduleEntityDeletion(payload.entity)
+                            }
+                            bullet.life = 0
+                            break bucketLoop
+                        }
+                    }
+                }
+            }
+        }
+
+        transform.position += bullet.velocity
+        bullet.life -= 1
+        if bullet.life < 0 {
+            ecs.ScheduleEntityDeletion(iterator.entity)
+            deleteCount += 1
+        }
+    }
+}
+
+ShootBullet :: proc(position: float2, rotation: f64, team: TeamID) {
+    entity := ecs.NewEntity()
+    ecs.AddComponent(entity, Transform {
+        position = position,
+        rotation = rotation,
+    })
+    ecs.AddComponent(entity, Bullet {
+        velocity = GetDirection(rotation) * 10,
+        life = 30,
+    })
+    ecs.AddComponent(entity, team)
 }
 
 
@@ -170,20 +280,6 @@ GetTeamRotation :: proc(team: int) -> f64 {
     return math.PI * 2 * t
 }
 
-GetAngle :: proc(direction: float2) -> f64 {
-    return math.atan2(direction.y, direction.x)
-}
-
-GetDirection :: proc(angle: f64) -> float2 {
-    return float2 {
-        math.cos(angle),
-        math.sin(angle),
-    }
-}
-
 GetBucketCell :: proc(position: float2) -> int2 {
-    return int2 {
-        int(math.floor(position.x / CELL_SIZE)),
-        int(math.floor(position.y / CELL_SIZE)),
-    }
+    return Floor(position / CELL_SIZE)
 }

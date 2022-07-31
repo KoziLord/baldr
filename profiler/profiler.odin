@@ -62,6 +62,9 @@ commandQueue := queue.Make(Command, 500000)
 @(private="file")
 activeThread : ^thread.Thread
 
+@(private="file")
+stopwatches := new([dynamic]^time.Stopwatch)
+
 StartOfFrame :: proc() {
     when PROFILER_ENABLED {
         scopes = make(map[CodeLocation]ScopeCost, 50)
@@ -126,7 +129,7 @@ MeasureThisScope :: proc(label:string = "", caller := #caller_location) -> Measu
         measurement.caller = caller
         measurement.label = label
         measurement.depth = currentDepth
-        measurement.stopwatch = new(time.Stopwatch, context.temp_allocator)
+        measurement.stopwatch = GetStopwatch()
         defer time.stopwatch_start(measurement.stopwatch)
         
         command := Command {
@@ -138,7 +141,6 @@ MeasureThisScope :: proc(label:string = "", caller := #caller_location) -> Measu
         
         currentDepth += 1
         
-    
         return measurement
     } else {
         return {}
@@ -150,7 +152,7 @@ ScopeFinished :: proc(measurement: Measurement) {
     when PROFILER_ENABLED {
         time.stopwatch_stop(measurement.stopwatch)
         duration := time.stopwatch_duration(measurement.stopwatch^)
-        free(measurement.stopwatch, context.temp_allocator)
+        ReturnStopwatch(measurement.stopwatch)
     
         command := Command {
             commandType = .EndScope,
@@ -161,6 +163,21 @@ ScopeFinished :: proc(measurement: Measurement) {
     
         currentDepth -= 1
     }
+}
+
+@(private="file")
+GetStopwatch :: proc() -> ^time.Stopwatch {
+    if len(stopwatches) == 0 {
+        return new(time.Stopwatch)
+    } else {
+        stopwatch := pop(stopwatches)
+        time.stopwatch_reset(stopwatch)
+        return stopwatch
+    }
+}
+
+ReturnStopwatch :: proc(stopwatch: ^time.Stopwatch) {
+    append(stopwatches, stopwatch)
 }
 
 @(private="file")

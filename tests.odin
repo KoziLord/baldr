@@ -100,8 +100,7 @@ TestMultiMap :: proc() {
         }
     }
 
-    iterator: multiMap.Iterator(int2, int)
-    multiMap.SetupIterator(buckets, int2 {5,5}, &iterator)
+    iterator := multiMap.SetupIterator(buckets, int2 {5,5})
 
     for multiMap.Iterate(&iterator) {
         fmt.printf("%v\n", iterator.value)
@@ -118,7 +117,7 @@ TestMultiMap :: proc() {
         }
     }
 
-    multiMap.SetupIterator(buckets, int2 {5,5}, &iterator)
+    iterator = multiMap.SetupIterator(buckets, int2 {5,5})
 
     for multiMap.Iterate(&iterator) {
         fmt.printf("%v\n", iterator.value)

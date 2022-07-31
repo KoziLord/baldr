@@ -102,13 +102,15 @@ HasKey :: proc(multiMap: ^MultiMap($Key, $Value), key: Key) -> bool {
     return ok
 }
 
-SetupIterator :: proc(multiMap: ^MultiMap($Key, $Value), key: Key, iterator: ^Iterator(Key, Value)) {
+SetupIterator :: proc(multiMap: ^MultiMap($Key, $Value), key: Key) -> Iterator(Key, Value) {
     firstIndex, ok := multiMap.firstIndex[key]
     if !ok do firstIndex = END_OF_LIST
 
+    iterator: Iterator(Key, Value)
     iterator.startIndex = firstIndex
     iterator.nextIndex = firstIndex
     iterator.multiMap = multiMap
+    return iterator
 }
 
 Iterate :: proc(iterator: ^Iterator($Key, $Value)) -> bool {
@@ -121,9 +123,6 @@ Iterate :: proc(iterator: ^Iterator($Key, $Value)) -> bool {
         return true
     }
 }
-
-@(private="file")
-BIG_PRIME :: 23456789
 
 @(private="file")
 GetHash :: proc(key: $T) -> uint {

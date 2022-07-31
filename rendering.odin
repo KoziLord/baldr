@@ -1,6 +1,8 @@
 package main
 
 import "ecs"
+import "profiler"
+
 import "core:strings"
 import "core:fmt"
 import "core:math"
@@ -13,20 +15,28 @@ charsPerRow :: asciiWidth+1
 sb := strings.make_builder_len(charsPerRow * asciiHeight)
 heatmap : [asciiWidth * asciiHeight]int = 0
 
-collectBoidsSystem : ecs.SystemID
+collectBoidsSystem: ecs.SystemID
+collectBulletsSystem: ecs.SystemID
+
+minPos, maxPos, fieldSize: float2
 
 InitIfNeeded :: proc() {
     if (ecs.IsNil(collectBoidsSystem)) {
         collectBoidsSystem = ecs.CreateSystem({Boid, Transform}, CollectBoids)
     }
+    if (ecs.IsNil(collectBulletsSystem)) {
+        collectBulletsSystem = ecs.CreateSystem({Bullet, Transform}, CollectBullets)
+    }
 }
 
 WriteWorldToConsole :: proc() {
+    profiler.MeasureThisScope("Render Systems")
     InitIfNeeded()
 
     heatmap = 0
 
     ecs.RunSystem(collectBoidsSystem)
+    ecs.RunSystem(collectBulletsSystem)
 
     totalCount := 0
 
@@ -39,7 +49,9 @@ WriteWorldToConsole :: proc() {
                 heat := heatmap[y*asciiWidth + x]
                 totalCount += heat
                 heat = min(heat, 35)
-                if heat == 0 {
+                if heat == -1 {
+                    sb.buf[index] = '*'
+                } else if heat == 0 {
                     sb.buf[index] = ' '
                 } else if heat < 10 {
                     sb.buf[index] = '0' + u8(heat)
@@ -56,8 +68,6 @@ WriteWorldToConsole :: proc() {
 }
 
 CollectBoids :: proc(iterator: ^ecs.SystemIterator) {
-    minPos, maxPos: float2
-
     for ecs.Iterate(iterator) {
         transform := ecs.GetComponent(iterator, Transform)
         if iterator.isFirstEntity {
@@ -71,37 +81,32 @@ CollectBoids :: proc(iterator: ^ecs.SystemIterator) {
     
     minPos -= 5
     maxPos += 5
-    fieldSize := maxPos - minPos
+    fieldSize = maxPos - minPos
 
     ecs.ResetIterator(iterator)
 
     for ecs.Iterate(iterator) {
         transform := ecs.GetComponent(iterator, Transform)
-        normalizedPos := (transform.position - minPos) / fieldSize
-
-        cell : [2]int = Floor(normalizedPos * float2 {asciiWidth, asciiHeight})
+        cell := HeatmapCell(transform.position)
         heatmap[cell.y*asciiWidth + cell.x] += 1
     }
 }
 
-
-Min :: proc(a, b: float2) -> float2 {
-    return float2 {
-        min(a.x, b.x),
-        min(a.y, b.y),
+CollectBullets :: proc(iterator: ^ecs.SystemIterator) {
+    for ecs.Iterate(iterator) {
+        transform := ecs.GetComponent(iterator, Transform)
+        cell, ok := HeatmapCell(transform.position)
+        if ok {
+            heatmap[cell.y*asciiWidth + cell.x] = -1
+        }
     }
 }
 
-Max :: proc(a, b: float2) -> float2 {
-    return float2 {
-        max(a.x, b.x),
-        max(a.y, b.y),
+HeatmapCell :: proc(position: float2) -> (int2, bool) #optional_ok {
+    if position.x < minPos.x || position.y < minPos.y || position.x >= maxPos.x || position.y >= maxPos.y {
+        return 0, false
     }
-}
-
-Floor :: proc(vector: float2) -> int2 {
-    return int2 {
-        int(math.floor(vector.x)),
-        int(math.floor(vector.y)),
-    }
+    normalizedPos := (position - minPos) / fieldSize
+    cell := Floor(normalizedPos * float2 {asciiWidth, asciiHeight})
+    return cell, true
 }
