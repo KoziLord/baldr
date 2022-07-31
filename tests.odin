@@ -90,7 +90,7 @@ DequeueWorker :: proc(t: ^thread.Thread) {
 
 
 TestMultiMap :: proc() {
-    buckets := multiMap.Make(int2, int, 100)
+    buckets := multiMap.Make(int2, int, 200)
 
     for x in 0..5 {
         for y in 0..5 {
@@ -100,14 +100,29 @@ TestMultiMap :: proc() {
         }
     }
 
-    iterator := multiMap.MakeIterator(buckets, int2 {5,5})
-    defer free(iterator)
+    iterator: multiMap.Iterator(int2, int)
+    multiMap.SetupIterator(buckets, int2 {5,5}, &iterator)
 
-    for multiMap.Iterate(iterator) {
+    for multiMap.Iterate(&iterator) {
         fmt.printf("%v\n", iterator.value)
     }
 
+    fmt.println("second round")
     multiMap.Clear(buckets)
+
+    for x in 0..5 {
+        for y in 0..5 {
+            for i in 0..<x*2 {
+                multiMap.Add(buckets, int2{x,y}, 20*i)
+            }
+        }
+    }
+
+    multiMap.SetupIterator(buckets, int2 {5,5}, &iterator)
+
+    for multiMap.Iterate(&iterator) {
+        fmt.printf("%v\n", iterator.value)
+    }
 
     multiMap.Delete(buckets)
 

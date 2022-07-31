@@ -20,7 +20,7 @@ CodeLocation :: runtime.Source_Code_Location
 
 @(private="file")
 Measurement :: struct {
-    startTime: time.Time,
+    stopwatch: ^time.Stopwatch,
     caller: CodeLocation,
     label: string,
     depth: int,
@@ -57,7 +57,7 @@ scopes: map[CodeLocation]ScopeCost
 currentDepth: int
 
 @(private="file")
-commandQueue := queue.Make(Command, 60000)
+commandQueue := queue.Make(Command, 500000)
 
 @(private="file")
 activeThread : ^thread.Thread
@@ -105,10 +105,11 @@ EndOfFrame :: proc() {
             for _ in 0..<scope.depth {
                 fmt.print("  ");
             }
-            fmt.printf("%v: %vms (taps: %v, worst: %vms)\n",
+            fmt.printf("%v: %vms (taps: %v, avg: %vms, worst: %vms)\n",
                        ResolveLabel(scope),
                        time.duration_milliseconds(scope.totalDuration),
                        scope.tapCount,
+                       time.duration_milliseconds(scope.totalDuration) / f64(scope.tapCount),
                        time.duration_milliseconds(scope.longestDuration))
         }
     
@@ -122,19 +123,21 @@ MeasureThisScope :: proc(label:string = "", caller := #caller_location) -> Measu
     when PROFILER_ENABLED {
         //fmt.printf("starting scope: %v\n", caller)
         measurement: Measurement
-        measurement.startTime = time.now()
         measurement.caller = caller
         measurement.label = label
         measurement.depth = currentDepth
-    
+        measurement.stopwatch = new(time.Stopwatch, context.temp_allocator)
+        defer time.stopwatch_start(measurement.stopwatch)
+        
         command := Command {
             commandType = .StartScope,
             measurement = measurement,
         }
-    
+        
         queue.Add(commandQueue, command)
-    
+        
         currentDepth += 1
+        
     
         return measurement
     } else {
@@ -145,7 +148,9 @@ MeasureThisScope :: proc(label:string = "", caller := #caller_location) -> Measu
 @(private="file")
 ScopeFinished :: proc(measurement: Measurement) {
     when PROFILER_ENABLED {
-        duration := time.since(measurement.startTime)
+        time.stopwatch_stop(measurement.stopwatch)
+        duration := time.stopwatch_duration(measurement.stopwatch^)
+        free(measurement.stopwatch, context.temp_allocator)
     
         command := Command {
             commandType = .EndScope,

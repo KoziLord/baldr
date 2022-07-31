@@ -102,9 +102,13 @@ GetComponentDataFromInstanceList :: proc(list: InstanceList, index: int) -> []by
 
 @(private)
 WriteComponentStronglyTyped :: proc(archetype: ^Archetype, writeIndex: int, component: $T) {
-    t := typeid_of(T)
-    bytes := mem.any_to_bytes(component)
-    WriteComponentFromBytes(archetype, writeIndex, bytes, t)
+    instanceList := GetInstanceList(archetype, T)
+    pointers := cast([^]T)instanceList.instances
+    pointers[writeIndex] = component
+    
+    // t := typeid_of(T)
+    // bytes := mem.any_to_bytes(component)
+    // WriteComponentFromBytes(archetype, writeIndex, bytes, t)
 }
 
 @(private)

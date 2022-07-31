@@ -1,5 +1,7 @@
 package ecs
 
+import "../profiler"
+
 import "core:fmt"
 import "core:mem"
 import "core:slice"
@@ -50,7 +52,6 @@ AddComponent :: proc(entity: EntityID, component: $T) {
 
 GetComponent :: proc {
     GetComponentBySystemIterator,
-    GetComponentByBucketIterator,
     GetComponentByEntity,
     GetComponentByIndex,
 }
@@ -65,10 +66,6 @@ GetComponentBySystemIterator :: proc(iterator: ^SystemIterator, $T: typeid) -> ^
                                T)
 }
 
-GetComponentByBucketIterator :: proc(iterator: ^BucketIterator, $T: typeid) -> ^T {
-    return GetComponentByEntity(iterator.entity, T)
-}
-
 GetComponentByEntity :: proc(entity: EntityID, $T: typeid) -> ^T {
     info := entityInfoLookup[entity]
     return GetComponentByIndex(info.archetype, info.indexInArchetype, T)
@@ -76,12 +73,7 @@ GetComponentByEntity :: proc(entity: EntityID, $T: typeid) -> ^T {
 
 GetComponentByIndex :: proc(archetype: ^Archetype, index: int, $T: typeid) -> ^T {
     instanceList := GetInstanceList(archetype, T)
-    bytes := GetComponentDataFromInstanceList(instanceList^, index)
-
-    //fmt.printf("got component: %v\n", bytes)
-
-    slice := mem.slice_data_cast([]T, bytes)
-    return &slice[0]
+    return &(cast([^]T)instanceList.instances)[index]
 }
 
 SortComponentsDynamicArray :: proc(components: [dynamic]typeid) {

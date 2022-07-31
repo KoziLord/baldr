@@ -1,14 +1,14 @@
 package multiMap
 
+import "../profiler"
+
 import "core:hash"
 import "core:fmt"
 import "core:mem"
 import "core:runtime"
 
-@(private="file")
 END_OF_LIST :: -1
 
-@(private="file")
 NO_VALUE :: -2
 
 MultiMap :: struct($Key, $Value: typeid) {
@@ -16,6 +16,14 @@ MultiMap :: struct($Key, $Value: typeid) {
     nextIndex: []int,
     values: []Value,
     capacity: int,
+    allocator: runtime.Allocator,
+}
+
+Iterator :: struct($Key, $Value: typeid) {
+    multiMap: ^MultiMap(Key, Value),
+    value: Value,
+    startIndex: int,
+    nextIndex: int,
 }
 
 Make :: proc($Key, $Value: typeid, capacity: int, allocator: runtime.Allocator = context.allocator) -> ^MultiMap(Key, Value) {
@@ -25,6 +33,7 @@ Make :: proc($Key, $Value: typeid, capacity: int, allocator: runtime.Allocator =
     multiMap.nextIndex = make([]int, capacity, allocator)
     multiMap.values = make([]Value, capacity, allocator)
     multiMap.capacity = capacity
+    multiMap.allocator = allocator
 
     Clear(multiMap)
 
@@ -35,16 +44,14 @@ Clear :: proc(multiMap: ^MultiMap($Key, $Value)) {
     for i in 0..<multiMap.capacity {
         multiMap.nextIndex[i] = NO_VALUE
     }
-    for key, _ in multiMap.firstIndex {
-        delete_key(&multiMap.firstIndex, key)
-    }
+    clear(&multiMap.firstIndex)
 }
 
-Delete :: proc(multiMap: ^MultiMap($Key, $Value), allocator: runtime.Allocator = context.allocator) {
+Delete :: proc(multiMap: ^MultiMap($Key, $Value)) {
     delete(multiMap.firstIndex)
-    delete(multiMap.nextIndex, allocator)
-    delete(multiMap.values, allocator)
-    free(multiMap)
+    delete(multiMap.nextIndex, multiMap.allocator)
+    delete(multiMap.values, multiMap.allocator)
+    free(multiMap, multiMap.allocator)
 }
 
 Add :: proc(multiMap: ^MultiMap($Key, $Value), key: Key, value: Value) {
@@ -63,13 +70,16 @@ Add :: proc(multiMap: ^MultiMap($Key, $Value), key: Key, value: Value) {
             }
         }
         multiMap.firstIndex[key] = index
+        //fmt.printf("writing firstIndex: %v\n", index)
 
     } else {
         // add to end of existing list
         index = firstIndex
+        //fmt.printf("reading firstIndex: %v\n", index)
         for multiMap.nextIndex[index] != END_OF_LIST {
             index = multiMap.nextIndex[index]
         }
+        //fmt.println("end of list")
         
         prevEndOfListIndex := index
         index = (index+1) % multiMap.capacity
@@ -87,19 +97,22 @@ Add :: proc(multiMap: ^MultiMap($Key, $Value), key: Key, value: Value) {
     multiMap.values[index] = value
 }
 
-MakeIterator :: proc(multiMap: ^MultiMap($Key, $Value), key: Key) -> ^Iterator(Key, Value) {
-    firstIndex, ok := multiMap.firstIndex[key]
+HasKey :: proc(multiMap: ^MultiMap($Key, $Value), key: Key) -> bool {
+    _, ok := multiMap.firstIndex[key]
+    return ok
+}
 
+SetupIterator :: proc(multiMap: ^MultiMap($Key, $Value), key: Key, iterator: ^Iterator(Key, Value)) {
+    firstIndex, ok := multiMap.firstIndex[key]
     if !ok do firstIndex = END_OF_LIST
 
-    iterator := new(Iterator(Key, Value))
     iterator.startIndex = firstIndex
     iterator.nextIndex = firstIndex
     iterator.multiMap = multiMap
-    return iterator
 }
 
 Iterate :: proc(iterator: ^Iterator($Key, $Value)) -> bool {
+    //profiler.MeasureThisScope()
     if iterator.nextIndex == END_OF_LIST {
         return false
     } else {
@@ -109,19 +122,11 @@ Iterate :: proc(iterator: ^Iterator($Key, $Value)) -> bool {
     }
 }
 
-Iterator :: struct($Key, $Value: typeid) {
-    multiMap: ^MultiMap(Key, Value),
-    value: Value,
-    startIndex: int,
-    nextIndex: int,
-}
+@(private="file")
+BIG_PRIME :: 23456789
 
 @(private="file")
 GetHash :: proc(key: $T) -> uint {
     bytes := mem.any_to_bytes(key)
-    when size_of(uint) == 4 {
-        return uint(hash.crc32(bytes))
-    } else when size_of(uint) == 8 {
-        return uint(hash.crc64_ecma_182(bytes))
-    }
+    return uint(hash.crc32(bytes))
 }

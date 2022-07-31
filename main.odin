@@ -2,6 +2,7 @@ package main
 
 import "ecs"
 import "profiler"
+import "multiMap"
 
 import "core:math"
 import "core:math/rand"
@@ -13,9 +14,10 @@ float2 :: [2]f64
 int2 :: [2]int
 
 teamCount :: 5
-boidsPerTeam :: 200
+boidsPerTeam :: 500
+CELL_SIZE :: 20.0
 
-boidBuckets : ^ecs.BucketMap
+boidBuckets : ^multiMap.MultiMap(int2, BucketPayload)
 
 Boid :: struct {
     speed: f64,
@@ -25,6 +27,11 @@ Boid :: struct {
 Transform :: struct {
     position: float2,
     rotation: f64,
+}
+
+BucketPayload :: struct {
+    entity: ecs.EntityID,
+    using transform: Transform,
 }
 
 Health :: struct {
@@ -53,7 +60,7 @@ main :: proc() {
         }
     }
 
-    boidBuckets = ecs.CreateBucketMap(8.0)
+    boidBuckets = multiMap.Make(int2, BucketPayload, teamCount * boidsPerTeam * 2)
 
     updateBoidsSystem := ecs.CreateSystem({Boid, Transform}, UpdateBoids)
 
@@ -66,14 +73,8 @@ main :: proc() {
 
         profiler.EndOfFrame()
 
-        time.sleep(16 * time.Millisecond)
+        time.sleep(5 * time.Millisecond)
     }
-}
-
-GetTransformBounds :: proc(transform: Transform) -> (min: float2, max: float2) {
-    min = transform.position
-    max = transform.position
-    return
 }
 
 UpdateBoids :: proc(iterator: ^ecs.SystemIterator) {
@@ -81,40 +82,57 @@ UpdateBoids :: proc(iterator: ^ecs.SystemIterator) {
 
     {
         profiler.MeasureThisScope("Write Buckets")
-        ecs.WriteBuckets(boidBuckets, iterator, Transform, GetTransformBounds)
+        multiMap.Clear(boidBuckets)
+        for ecs.Iterate(iterator) {
+            transform := ecs.GetComponent(iterator, Transform)
+            cell := GetBucketCell(transform.position)
+            payload := BucketPayload {
+                entity = iterator.entity,
+                transform = transform^,
+            }
+            multiMap.Add(boidBuckets, cell, payload)
+        }
+        ecs.ResetIterator(iterator)
     }
 
-    lookaheadDist := 20.0
+    
+    {
+        profiler.MeasureThisScope("Iterate Buckets")
 
-    for ecs.Iterate(iterator) {
-        entity := iterator.entity
-        boid := ecs.GetComponent(iterator, Boid)
-        transform := ecs.GetComponent(iterator, Transform)
+        lookaheadDist := 10.0
+        for ecs.Iterate(iterator) {
+            entity := iterator.entity
+            boid := ecs.GetComponent(iterator, Boid)
+            transform := ecs.GetComponent(iterator, Transform)
 
-        forward := GetDirection(transform.rotation)
+            forward := GetDirection(transform.rotation)
 
-        {
-            profiler.MeasureThisScope("Iterate Buckets")
             lookaheadPos := transform.position + forward*lookaheadDist
     
             avgNearbyPos: float2 = 0
             nearbyCount := 0
     
-            bucketIterator := ecs.GetBucketIterator(boidBuckets,
-                                                    lookaheadPos-lookaheadDist,
-                                                    lookaheadPos+lookaheadDist)
-    
-            for ecs.Iterate(bucketIterator) {
-                //profiler.MeasureThisScope("Tap Nearby Boid")
-                if bucketIterator.entity != entity {
-                    otherTransform := ecs.GetComponent(bucketIterator, Transform)
-                    avgNearbyPos += otherTransform.position
-                    nearbyCount += 1
+            minCell := GetBucketCell(lookaheadPos - lookaheadDist)
+            maxCell := GetBucketCell(lookaheadPos + lookaheadDist)
+
+            bucketIterator: multiMap.Iterator(int2, BucketPayload)
+            for x in minCell.x..maxCell.x {
+                for y in minCell.y..maxCell.y {
+                    cell := int2 {x,y}
+                    multiMap.SetupIterator(boidBuckets, cell, &bucketIterator)
+                    
+                    for multiMap.Iterate(&bucketIterator) {
+                        payload := bucketIterator.value
+                        if payload.entity != entity {
+                            avgNearbyPos += payload.position
+                            nearbyCount += 1
+                        }
+                    }
                 }
             }
-            
+        
             if nearbyCount > 0 {
-                profiler.MeasureThisScope("Steering")
+                //profiler.MeasureThisScope("Steering")
                 avgNearbyPos /= f64(nearbyCount)
                 delta := avgNearbyPos - transform.position
                 targetAngle := GetAngle(delta)
@@ -130,13 +148,11 @@ UpdateBoids :: proc(iterator: ^ecs.SystemIterator) {
                 
                 transform.rotation -= math.floor((transform.rotation + math.PI) / (math.PI*2)) * math.PI*2
             }
-        }
             
-
-        transform.position += forward * boid.speed
+            
+            transform.position += forward * boid.speed
+        }
     }
-
-
 }
 
 
@@ -162,5 +178,12 @@ GetDirection :: proc(angle: f64) -> float2 {
     return float2 {
         math.cos(angle),
         math.sin(angle),
+    }
+}
+
+GetBucketCell :: proc(position: float2) -> int2 {
+    return int2 {
+        int(math.floor(position.x / CELL_SIZE)),
+        int(math.floor(position.y / CELL_SIZE)),
     }
 }
