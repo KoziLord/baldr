@@ -49,11 +49,21 @@ Health :: struct {
     health: int,
 }
 
+ExplosionParticle :: struct {
+    position: float2,
+    velocity: float2,
+    life: f64,
+}
+
 main :: proc() {
     TestECSStuff()
     TestQueue()
     TestMultiMap()
 
+    RunBoidsSimulation()
+}
+
+RunBoidsSimulation :: proc() {
     for i in 0..<teamCount {
         for j in 0..<boidsPerTeam {
             boid := ecs.NewEntity()
@@ -66,7 +76,7 @@ main :: proc() {
                 rotation = GetTeamRotation(i),
             })
             ecs.AddComponent(boid, Health {
-                health = 5,
+                health = 4,
             })
         }
     }
@@ -75,6 +85,7 @@ main :: proc() {
 
     updateBoidsSystem := ecs.CreateSystem({Boid, Transform, TeamID}, UpdateBoids)
     updateBulletsSystem := ecs.CreateSystem({Bullet, Transform, TeamID}, UpdateBullets)
+    updateExplosionsSystem := ecs.CreateSystem({ExplosionParticle}, UpdateExplosions)
 
     for {
         profiler.StartOfFrame()
@@ -84,6 +95,7 @@ main :: proc() {
 
             ecs.RunSystem(updateBoidsSystem)
             ecs.RunSystem(updateBulletsSystem)
+            ecs.RunSystem(updateExplosionsSystem)
     
             ecs.PerformScheduledEntityDeletions()
     
@@ -234,6 +246,7 @@ UpdateBullets :: proc(iterator: ^ecs.SystemIterator) {
                             health.health -= 1
                             if health.health <= 0 {
                                 ecs.ScheduleEntityDeletion(payload.entity)
+                                SpawnExplosion(boidPos)
                             }
                             bullet.life = 0
                             break bucketLoop
@@ -252,6 +265,20 @@ UpdateBullets :: proc(iterator: ^ecs.SystemIterator) {
     }
 }
 
+UpdateExplosions :: proc(iterator: ^ecs.SystemIterator) {
+    for ecs.Iterate(iterator) {
+        particle := ecs.GetComponent(iterator, ExplosionParticle)
+        
+        particle.life -= .05
+        particle.position += particle.velocity
+        particle.velocity *= .85
+
+        if particle.life <= 0 {
+            ecs.ScheduleEntityDeletion(iterator.entity)
+        }
+    }
+}
+
 ShootBullet :: proc(position: float2, rotation: f64, team: TeamID) {
     entity := ecs.NewEntity()
     ecs.AddComponent(entity, Transform {
@@ -260,9 +287,24 @@ ShootBullet :: proc(position: float2, rotation: f64, team: TeamID) {
     })
     ecs.AddComponent(entity, Bullet {
         velocity = GetDirection(rotation) * 10,
-        life = 30,
+        life = 100,
     })
     ecs.AddComponent(entity, team)
+}
+
+SpawnExplosion :: proc(position: float2) {
+    for i in 0..<30  {
+        angle := rand.float64() * math.PI*2
+        speed := rand.float64() * 10
+        velocity := GetDirection(angle) * speed
+
+        entity := ecs.NewEntity()
+        ecs.AddComponent(entity, ExplosionParticle {
+            position = position,
+            velocity = velocity,
+            life = rand.float64_range(0.5, 1.0),
+        })
+    }
 }
 
 

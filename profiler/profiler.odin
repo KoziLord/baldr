@@ -20,7 +20,7 @@ CodeLocation :: runtime.Source_Code_Location
 
 @(private="file")
 Measurement :: struct {
-    stopwatch: ^time.Stopwatch,
+    stopwatch: time.Stopwatch,
     caller: CodeLocation,
     label: string,
     depth: int,
@@ -129,8 +129,6 @@ MeasureThisScope :: proc(label:string = "", caller := #caller_location) -> Measu
         measurement.caller = caller
         measurement.label = label
         measurement.depth = currentDepth
-        measurement.stopwatch = GetStopwatch()
-        defer time.stopwatch_start(measurement.stopwatch)
         
         command := Command {
             commandType = .StartScope,
@@ -141,6 +139,8 @@ MeasureThisScope :: proc(label:string = "", caller := #caller_location) -> Measu
         
         currentDepth += 1
         
+        time.stopwatch_start(&measurement.stopwatch)
+        
         return measurement
     } else {
         return {}
@@ -150,9 +150,9 @@ MeasureThisScope :: proc(label:string = "", caller := #caller_location) -> Measu
 @(private="file")
 ScopeFinished :: proc(measurement: Measurement) {
     when PROFILER_ENABLED {
-        time.stopwatch_stop(measurement.stopwatch)
-        duration := time.stopwatch_duration(measurement.stopwatch^)
-        ReturnStopwatch(measurement.stopwatch)
+        stopwatch := measurement.stopwatch
+        time.stopwatch_stop(&stopwatch)
+        duration := time.stopwatch_duration(measurement.stopwatch)
     
         command := Command {
             commandType = .EndScope,
@@ -160,24 +160,9 @@ ScopeFinished :: proc(measurement: Measurement) {
             duration = duration,
         }
         queue.Add(commandQueue, command)
-    
+        
         currentDepth -= 1
     }
-}
-
-@(private="file")
-GetStopwatch :: proc() -> ^time.Stopwatch {
-    if len(stopwatches) == 0 {
-        return new(time.Stopwatch)
-    } else {
-        stopwatch := pop(stopwatches)
-        time.stopwatch_reset(stopwatch)
-        return stopwatch
-    }
-}
-
-ReturnStopwatch :: proc(stopwatch: ^time.Stopwatch) {
-    append(stopwatches, stopwatch)
 }
 
 @(private="file")
@@ -207,7 +192,6 @@ Worker :: proc(thread: ^thread.Thread) {
         command, ok := queue.Read(commandQueue)
         if ok {
             //fmt.printf("got a command! %v remaining, L%v\n", commandQueue.count, command.measurement.caller)
-            // got a command!
             if command.commandType == .StartScope {
                 measurement := command.measurement
                 _, ok := scopes[measurement.caller]

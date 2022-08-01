@@ -7,36 +7,28 @@ import "core:strings"
 import "core:fmt"
 import "core:math"
 
-asciiWidth :: 50
-asciiHeight :: 25
+asciiWidth :: 100
+asciiHeight :: 50
 
 charsPerRow :: asciiWidth+1
 
 sb := strings.make_builder_len(charsPerRow * asciiHeight)
 heatmap : [asciiWidth * asciiHeight]int = 0
 
-collectBoidsSystem: ecs.SystemID
-collectBulletsSystem: ecs.SystemID
+collectBoidsSystem := ecs.CreateSystem({Boid, Transform}, CollectBoids)
+collectBulletsSystem := ecs.CreateSystem({Bullet, Transform}, CollectBullets)
+collectParticlesSystem := ecs.CreateSystem({ExplosionParticle}, CollectParticles)
 
 minPos, maxPos, fieldSize: float2
 
-InitIfNeeded :: proc() {
-    if (ecs.IsNil(collectBoidsSystem)) {
-        collectBoidsSystem = ecs.CreateSystem({Boid, Transform}, CollectBoids)
-    }
-    if (ecs.IsNil(collectBulletsSystem)) {
-        collectBulletsSystem = ecs.CreateSystem({Bullet, Transform}, CollectBullets)
-    }
-}
-
 WriteWorldToConsole :: proc() {
     profiler.MeasureThisScope("Render Systems")
-    InitIfNeeded()
 
     heatmap = 0
 
     ecs.RunSystem(collectBoidsSystem)
     ecs.RunSystem(collectBulletsSystem)
+    ecs.RunSystem(collectParticlesSystem)
 
     totalCount := 0
 
@@ -49,7 +41,9 @@ WriteWorldToConsole :: proc() {
                 heat := heatmap[y*asciiWidth + x]
                 totalCount += heat
                 heat = min(heat, 35)
-                if heat == -1 {
+                if heat == -2 {
+                    sb.buf[index] = '#'
+                } else if heat == -1 {
                     sb.buf[index] = '*'
                 } else if heat == 0 {
                     sb.buf[index] = ' '
@@ -87,6 +81,7 @@ CollectBoids :: proc(iterator: ^ecs.SystemIterator) {
 
     for ecs.Iterate(iterator) {
         transform := ecs.GetComponent(iterator, Transform)
+
         cell := HeatmapCell(transform.position)
         heatmap[cell.y*asciiWidth + cell.x] += 1
     }
@@ -95,9 +90,21 @@ CollectBoids :: proc(iterator: ^ecs.SystemIterator) {
 CollectBullets :: proc(iterator: ^ecs.SystemIterator) {
     for ecs.Iterate(iterator) {
         transform := ecs.GetComponent(iterator, Transform)
+
         cell, ok := HeatmapCell(transform.position)
         if ok {
             heatmap[cell.y*asciiWidth + cell.x] = -1
+        }
+    }
+}
+
+CollectParticles :: proc(iterator: ^ecs.SystemIterator) {
+    for ecs.Iterate(iterator) {
+        particle := ecs.GetComponent(iterator, ExplosionParticle)
+        
+        cell, ok := HeatmapCell(particle.position)
+        if ok {
+            heatmap[cell.y*asciiWidth + cell.x] = -2
         }
     }
 }
