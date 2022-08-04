@@ -1,12 +1,12 @@
-package ecs
+package ECS
 
-import "../profiler"
+import "../Profiler"
 
 import "core:fmt"
 import "core:mem"
 import "core:slice"
 
-AddComponent :: proc(entity: EntityID, component: $T) {
+AddComponent :: proc(entity: EntityID, component: $T) -> ^T {
     //fmt.printf("adding component %v to entity %v\n", typeid_of(type_of(component)), entity)
 
     entityInfo := &entityInfoLookup[entity]
@@ -48,6 +48,8 @@ AddComponent :: proc(entity: EntityID, component: $T) {
 
     entityInfo.archetype = archetype
     entityInfo.indexInArchetype = indexInNewArchetype
+
+    return GetComponentByIndex(archetype, indexInNewArchetype, T)
 }
 
 GetComponent :: proc {

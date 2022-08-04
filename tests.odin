@@ -1,46 +1,47 @@
 package main
 
-import "ecs"
-import "queue"
-import "multiMap"
+import "ECS"
+import "Queue"
+import "MultiMap"
+import "Transform"
 
 import "core:fmt"
 import "core:thread"
 import "core:sync"
 
 TestECSStuff :: proc() {
-    entity1 := ecs.NewEntity()
-    entity2 := ecs.NewEntity()
+    entity1 := ECS.NewEntity()
+    entity2 := ECS.NewEntity()
     
-    ecs.AddComponent(entity2, Transform { position = 0, rotation = 0 })
-    ecs.AddComponent(entity1, Transform { position = 5, rotation = 0})
-    ecs.AddComponent(entity1, Health { health = 100 })
+    ECS.AddComponent(entity2, Transform2D { localPosition = 0, localRotation = 0 })
+    ECS.AddComponent(entity1, Transform2D { localPosition = 5, localRotation = 0})
+    ECS.AddComponent(entity1, Health { health = 100 })
 
-    updateTransformsSystem := ecs.CreateSystem({Transform}, UpdateTransformsTest)
+    updateTransformsSystem := ECS.CreateSystem({Transform2D}, UpdateTransformsTest)
 
-    ecs.RunSystem(updateTransformsSystem)
-    ecs.RunSystem(updateTransformsSystem)
-    ecs.RunSystem(updateTransformsSystem)
+    ECS.RunSystem(updateTransformsSystem)
+    ECS.RunSystem(updateTransformsSystem)
+    ECS.RunSystem(updateTransformsSystem)
 
     archetypesToTest : [][]typeid = {
-        {Transform},
+        {Transform2D},
         {Health},
-        {Health, Transform},
+        {Health, Transform2D},
     }
 
     for typeSet in archetypesToTest {
-        archetype := ecs.GetArchetype(typeSet)
+        archetype := ECS.GetArchetype(typeSet)
         fmt.printf("count/capacity of %v: %v/%v\n", typeSet, archetype.count, archetype.capacity)
     }
 
-    entity1Info := ecs.entityInfoLookup[entity1]
+    entity1Info := ECS.entityInfoLookup[entity1]
     fmt.printf("entity1's index in its archetype: %v\n", entity1Info.indexInArchetype)
 }
 
-UpdateTransformsTest :: proc(iterator: ^ecs.SystemIterator) {
-    for ecs.Iterate(iterator) {
-        transform := ecs.GetComponent(iterator, Transform)
-        transform.position += 1
+UpdateTransformsTest :: proc(iterator: ^ECS.SystemIterator) {
+    for ECS.Iterate(iterator) {
+        transform := ECS.GetComponent(iterator, Transform2D)
+        transform.localPosition += 1
     }
 }
 
@@ -48,14 +49,14 @@ UpdateTransformsTest :: proc(iterator: ^ecs.SystemIterator) {
 sum := 0
 
 @(private="file")
-testQueue: ^queue.Queue(int)
+testQueue: ^Queue.Queue(int)
 
 TestQueue :: proc() {
-    testQueue = queue.Make(int, 10000)
-    defer queue.Delete(testQueue)
+    testQueue = Queue.Make(int, 10000)
+    defer Queue.Delete(testQueue)
 
     for i in 1..10000 {
-        queue.Add(testQueue, i)
+        Queue.Add(testQueue, i)
     }
 
     threadCount := 4
@@ -81,7 +82,7 @@ TestQueue :: proc() {
 
 DequeueWorker :: proc(t: ^thread.Thread) {
     for testQueue.count > 0 {
-        if value, ok := queue.Read(testQueue); ok {
+        if value, ok := Queue.Read(testQueue); ok {
             sync.atomic_add(&sum, value, .Sequentially_Consistent)
         }
     }
@@ -90,41 +91,78 @@ DequeueWorker :: proc(t: ^thread.Thread) {
 
 
 TestMultiMap :: proc() {
-    buckets := multiMap.Make(int2, int, 200)
+    buckets := MultiMap.Make(int2, int, 200)
 
     for x in 0..5 {
         for y in 0..5 {
             for i in 0..<x {
-                multiMap.Add(buckets, int2 {x,y}, 10*i)
+                MultiMap.Add(buckets, int2 {x,y}, 10*i)
             }
         }
     }
 
-    iterator := multiMap.SetupIterator(buckets, int2 {5,5})
+    iterator := MultiMap.SetupIterator(buckets, int2 {5,5})
 
-    for multiMap.Iterate(&iterator) {
+    for MultiMap.Iterate(&iterator) {
         fmt.printf("%v\n", iterator.value)
     }
 
     fmt.println("second round")
-    multiMap.Clear(buckets)
+    MultiMap.Clear(buckets)
 
     for x in 0..5 {
         for y in 0..5 {
             for i in 0..<x*2 {
-                multiMap.Add(buckets, int2{x,y}, 20*i)
+                MultiMap.Add(buckets, int2{x,y}, 20*i)
             }
         }
     }
 
-    iterator = multiMap.SetupIterator(buckets, int2 {5,5})
+    iterator = MultiMap.SetupIterator(buckets, int2 {5,5})
 
-    for multiMap.Iterate(&iterator) {
+    for MultiMap.Iterate(&iterator) {
         fmt.printf("%v\n", iterator.value)
     }
 
-    multiMap.Delete(buckets)
+    MultiMap.Delete(buckets)
 
     fmt.println("multi-map test complete")
+}
+
+TestTransforms :: proc() {
+    using ECS
+
+    entity2D := NewEntity()
+    entity3D := NewEntity()
+    otherEntity3D := NewEntity()
+
+    transform2D := AddComponent(entity2D,
+                                Transform.Make2D(float2{3,7}, 0, 2))
+    transform3D := AddComponent(entity3D,
+                                Transform.Make3D(float3{10,20,30}, 1, 1))
+    otherTransform3D := AddComponent(otherEntity3D,
+                                     Transform.Make3D(float3{100,200,300}))
+
+    transform2D.parent = entity3D
+    transform3D.parent = otherEntity3D
+
+    fmt.printf("2D localPos: %v\n2D worldPos: %v\n",
+               transform2D.localPosition,
+               Transform.GetWorldPos(transform2D))
+    fmt.printf("3D localPos: %v\n3D worldPos: %v\n",
+               transform3D.localPosition,
+               Transform.GetWorldPos(transform3D))
+    fmt.printf("other 3D localPos: %v\nother 3D worldPos: %v\n",
+               otherTransform3D.localPosition,
+               Transform.GetWorldPos(otherTransform3D))
+
+    otherTransform3D.localPosition += 100
+    fmt.printf("2D localPos: %v\n2D worldPos: %v\n",
+               transform2D.localPosition,
+               Transform.GetWorldPos(transform2D))
+    
+    fmt.printf("3D localPos: %v\n3D worldPos: %v\n",
+               transform3D.localPosition,
+               Transform.GetWorldPos(transform3D))
 }
 

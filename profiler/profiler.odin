@@ -1,6 +1,6 @@
-package profiler
+package Profiler
 
-import "../queue"
+import "../Queue"
 
 import "core:time"
 import "core:runtime"
@@ -13,7 +13,7 @@ import "core:thread"
 @(private="file")
 PROFILER_ENABLED :: #config(PROFILER, false)
 
-Queue :: ^queue.Queue
+Queue :: ^Queue.Queue
 
 @(private="file")
 CodeLocation :: runtime.Source_Code_Location
@@ -57,7 +57,7 @@ scopes: map[CodeLocation]ScopeCost
 currentDepth: int
 
 @(private="file")
-commandQueue := queue.Make(Command, 500000)
+commandQueue := Queue.Make(Command, 500000)
 
 @(private="file")
 activeThread : ^thread.Thread
@@ -135,7 +135,7 @@ MeasureThisScope :: proc(label:string = "", caller := #caller_location) -> Measu
             measurement = measurement,
         }
         
-        queue.Add(commandQueue, command)
+        Queue.Add(commandQueue, command)
         
         currentDepth += 1
         
@@ -159,7 +159,7 @@ ScopeFinished :: proc(measurement: Measurement) {
             measurement = measurement,
             duration = duration,
         }
-        queue.Add(commandQueue, command)
+        Queue.Add(commandQueue, command)
         
         currentDepth -= 1
     }
@@ -189,7 +189,7 @@ FreeLabel :: proc(label: string, didAllocate: bool) {
 @(private="file")
 Worker :: proc(thread: ^thread.Thread) {
     for {
-        command, ok := queue.Read(commandQueue)
+        command, ok := Queue.Read(commandQueue)
         if ok {
             //fmt.printf("got a command! %v remaining, L%v\n", commandQueue.count, command.measurement.caller)
             if command.commandType == .StartScope {

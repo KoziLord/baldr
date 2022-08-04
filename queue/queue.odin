@@ -1,4 +1,4 @@
-package queue
+package Queue
 
 import "core:runtime"
 import "core:sync"

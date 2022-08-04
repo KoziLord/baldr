@@ -1,8 +1,9 @@
 package main
 
-import "ecs"
-import "profiler"
-import "multiMap"
+import "ECS"
+import "Profiler"
+import "MultiMap"
+import "Transform"
 
 import "core:math"
 import "core:math/rand"
@@ -11,20 +12,21 @@ import "core:time"
 import "core:strings"
 
 float2 :: [2]f64
+float3 :: [3]f64
 int2 :: [2]int
-Optional :: ecs.Optional
+Optional :: ECS.Optional
 
 teamCount :: 5
 boidsPerTeam :: 200
 CELL_SIZE :: 20.0
 
 
-boidBuckets : ^multiMap.MultiMap(int2, BucketPayload)
+boidBuckets : ^MultiMap.MultiMap(int2, BucketPayload)
 
 Boid :: struct {
     speed: f64,
     shootTimer: int,
-    target: Optional(ecs.EntityID),
+    target: Optional(ECS.EntityID),
 }
 
 Bullet :: struct {
@@ -34,14 +36,9 @@ Bullet :: struct {
 
 TeamID :: distinct int
 
-Transform :: struct {
-    position: float2,
-    rotation: f64,
-}
-
 BucketPayload :: struct {
-    entity: ecs.EntityID,
-    using transform: Transform,
+    entity: ECS.EntityID,
+    using transform: Transform2D,
     team: TeamID,
 }
 
@@ -50,126 +47,140 @@ Health :: struct {
 }
 
 ExplosionParticle :: struct {
-    position: float2,
     velocity: float2,
     life: f64,
 }
+
+Transform2D :: Transform.Transform2D
 
 main :: proc() {
     TestECSStuff()
     TestQueue()
     TestMultiMap()
+    TestTransforms()
 
     RunBoidsSimulation()
+
 }
 
 RunBoidsSimulation :: proc() {
     for i in 0..<teamCount {
         for j in 0..<boidsPerTeam {
-            boid := ecs.NewEntity()
-            ecs.AddComponent(boid, Boid {
+            boid := ECS.NewEntity()
+            ECS.AddComponent(boid, Boid {
                 speed = 1,
             })
-            ecs.AddComponent(boid, TeamID(i))
-            ecs.AddComponent(boid, Transform {
-                position = GetSpawnPosition(i, j),
-                rotation = GetTeamRotation(i),
-            })
-            ecs.AddComponent(boid, Health {
+            ECS.AddComponent(boid, TeamID(i))
+            ECS.AddComponent(boid, Transform.Make2D(
+                GetSpawnPosition(i, j),
+                GetTeamRotation(i),
+            ))
+            ECS.AddComponent(boid, Health {
                 health = 4,
             })
         }
     }
 
-    boidBuckets = multiMap.Make(int2, BucketPayload, teamCount * boidsPerTeam * 2)
+    boidBuckets = MultiMap.Make(int2, BucketPayload, teamCount * boidsPerTeam * 2)
 
-    updateBoidsSystem := ecs.CreateSystem({Boid, Transform, TeamID}, UpdateBoids)
-    updateBulletsSystem := ecs.CreateSystem({Bullet, Transform, TeamID}, UpdateBullets)
-    updateExplosionsSystem := ecs.CreateSystem({ExplosionParticle}, UpdateExplosions)
+    updateBoidsSystem := ECS.CreateSystem({Boid, Transform2D, TeamID}, UpdateBoids)
+    updateBulletsSystem := ECS.CreateSystem({Bullet, Transform2D, TeamID}, UpdateBullets)
+    updateExplosionsSystem := ECS.CreateSystem({ExplosionParticle, Transform2D}, UpdateExplosions)
 
     for {
-        profiler.StartOfFrame()
+        Profiler.StartOfFrame()
 
         {
-            profiler.MeasureThisScope("Full Frame")
+            Profiler.MeasureThisScope("Full Frame")
 
-            ecs.RunSystem(updateBoidsSystem)
-            ecs.RunSystem(updateBulletsSystem)
-            ecs.RunSystem(updateExplosionsSystem)
+            ECS.RunSystem(updateBoidsSystem)
+            ECS.RunSystem(updateBulletsSystem)
+            ECS.RunSystem(updateExplosionsSystem)
     
-            ecs.PerformScheduledEntityDeletions()
+            ECS.PerformScheduledEntityDeletions()
     
             WriteWorldToConsole()
         }
 
-        profiler.EndOfFrame()
+        Profiler.EndOfFrame()
 
         time.sleep(5 * time.Millisecond)
     }
 }
 
-UpdateBoids :: proc(iterator: ^ecs.SystemIterator) {
-    profiler.MeasureThisScope("Boids System")
+UpdateBoids :: proc(iterator: ^ECS.SystemIterator) {
+    Profiler.MeasureThisScope("Boids System")
 
     {
-        profiler.MeasureThisScope("Write Buckets")
-        multiMap.Clear(boidBuckets)
-        for ecs.Iterate(iterator) {
-            transform := ecs.GetComponent(iterator, Transform)
-            team := ecs.GetComponent(iterator, TeamID)
-            cell := GetBucketCell(transform.position)
+        Profiler.MeasureThisScope("Write Buckets")
+        MultiMap.Clear(boidBuckets)
+        for ECS.Iterate(iterator) {
+            transform := ECS.GetComponent(iterator, Transform2D)
+            team := ECS.GetComponent(iterator, TeamID)
+            cell := GetBucketCell(transform.localPosition)
             payload := BucketPayload {
                 entity = iterator.entity,
                 transform = transform^,
                 team = team^,
             }
-            multiMap.Add(boidBuckets, cell, payload)
+            MultiMap.Add(boidBuckets, cell, payload)
         }
-        ecs.ResetIterator(iterator)
+        ECS.ResetIterator(iterator)
     }
 
     
     {
-        profiler.MeasureThisScope("Update Boids")
-        for ecs.Iterate(iterator) {
-            entity := iterator.entity
-            boid := ecs.GetComponent(iterator, Boid)
-            team := ecs.GetComponent(iterator, TeamID)
-            transform := ecs.GetComponent(iterator, Transform)
-
-            if boid.target == nil {
-                boid.target = ecs.GetRandomEntity(iterator)
-                targetEntity, ok := boid.target.(ecs.EntityID)
-                if ok {
-                    targetTeam := ecs.GetComponent(targetEntity, TeamID)
-                    if targetTeam == team {
-                        boid.target = nil
+        Profiler.MeasureThisScope("Update Boids")
+        for ECS.Iterate(iterator) {
+            entity: ECS.EntityID
+            boid: ^Boid
+            team: ^TeamID
+            transform: ^Transform2D
+            {
+                //profiler.MeasureThisScope("get components, write buckets")
+                entity = iterator.entity
+                boid = ECS.GetComponent(iterator, Boid)
+                team = ECS.GetComponent(iterator, TeamID)
+                transform = ECS.GetComponent(iterator, Transform2D)
+    
+                if boid.target == nil {
+                    boid.target = ECS.GetRandomEntity(iterator)
+                    targetEntity, ok := boid.target.(ECS.EntityID)
+                    if ok {
+                        targetTeam := ECS.GetComponent(targetEntity, TeamID)
+                        if targetTeam == team {
+                            boid.target = nil
+                        }
                     }
                 }
             }
         
-            lookaheadDist := 10.0
-
-            forward := GetDirection(transform.rotation)
-
-            lookaheadPos := transform.position + forward*lookaheadDist
-    
             avgNearbyPos: float2 = 0
             nearbyCount := 0
+            forward := GetDirection(transform.localRotation)
+
+            {
+                //profiler.MeasureThisScope("Get buckets")
+                lookaheadDist := 10.0
     
-            minCell := GetBucketCell(lookaheadPos - lookaheadDist)
-            maxCell := GetBucketCell(lookaheadPos + lookaheadDist)
-
-            for x in minCell.x..maxCell.x {
-                for y in minCell.y..maxCell.y {
-                    cell := int2 {x,y}
-
-                    bucketIterator := multiMap.SetupIterator(boidBuckets, cell)
-                    for multiMap.Iterate(&bucketIterator) {
-                        payload := bucketIterator.value
-                        if payload.entity != entity {
-                            avgNearbyPos += payload.position
-                            nearbyCount += 1
+    
+                lookaheadPos := transform.localPosition + forward*lookaheadDist
+        
+        
+                minCell := GetBucketCell(lookaheadPos - lookaheadDist)
+                maxCell := GetBucketCell(lookaheadPos + lookaheadDist)
+    
+                for x in minCell.x..maxCell.x {
+                    for y in minCell.y..maxCell.y {
+                        cell := int2 {x,y}
+    
+                        bucketIterator := MultiMap.SetupIterator(boidBuckets, cell)
+                        for MultiMap.Iterate(&bucketIterator) {
+                            payload := bucketIterator.value
+                            if payload.entity != entity {
+                                avgNearbyPos += payload.localPosition
+                                nearbyCount += 1
+                            }
                         }
                     }
                 }
@@ -178,74 +189,76 @@ UpdateBoids :: proc(iterator: ^ecs.SystemIterator) {
             if nearbyCount > 0 {
                 //profiler.MeasureThisScope("Steering")
                 avgNearbyPos /= f64(nearbyCount)
-                delta := avgNearbyPos - transform.position
+                delta := avgNearbyPos - transform.localPosition
                 angleToGroup := GetAngle(delta)
                 
-                transform.rotation += AngleDiff(angleToGroup, transform.rotation) * .005
+                transform.localRotation += AngleDiff(angleToGroup, transform.localRotation) * .005
                 
-                transform.rotation += rand.float64_range(-1, 1)*.1
+                transform.localRotation += rand.float64_range(-1, 1)*.1
                 
-                transform.rotation -= math.floor((transform.rotation + math.PI) / (math.PI*2)) * math.PI*2
+                transform.localRotation -= math.floor((transform.localRotation + math.PI) / (math.PI*2)) * math.PI*2
             }
             
-            target, hasTarget := boid.target.(ecs.EntityID)
+            target, hasTarget := boid.target.(ECS.EntityID)
             if hasTarget {
-                if ecs.IsNil(target) {
+                //profiler.MeasureThisScope("Follow target")
+                if ECS.IsNil(target) {
                     boid.target = nil
                 } else {
-                    targetTransform := ecs.GetComponent(target, Transform)
-                    angleToTarget := GetAngle(targetTransform.position - transform.position)
-                    angleDiff := AngleDiff(angleToTarget, transform.rotation)
-                    transform.rotation += angleDiff * .005
+                    targetTransform := ECS.GetComponent(target, Transform2D)
+                    angleToTarget := GetAngle(targetTransform.localPosition - transform.localPosition)
+                    angleDiff := AngleDiff(angleToTarget, transform.localRotation)
+                    transform.localRotation += angleDiff * .005
                     
                     boid.shootTimer -= 1
                     if boid.shootTimer <= 0 {
                         if abs(angleDiff) < .1 {
-                            ShootBullet(transform.position, transform.rotation, team^)
+                            //profiler.MeasureThisScope("Shoot bullets")
+                            ShootBullet(transform.localPosition, transform.localRotation, team^)
                             boid.shootTimer = 20
                         }
                     }
                 }
             }
             
-            transform.position += forward * boid.speed
+            transform.localPosition += forward * boid.speed
         }
     }
 }
 
-UpdateBullets :: proc(iterator: ^ecs.SystemIterator) {
-    profiler.MeasureThisScope()
+UpdateBullets :: proc(iterator: ^ECS.SystemIterator) {
+    Profiler.MeasureThisScope()
     
     deleteCount := 0
-    for ecs.Iterate(iterator) {
-        bullet := ecs.GetComponent(iterator, Bullet)
-        transform := ecs.GetComponent(iterator, Transform)
-        team := ecs.GetComponent(iterator, TeamID)^
+    for ECS.Iterate(iterator) {
+        bullet := ECS.GetComponent(iterator, Bullet)
+        transform := ECS.GetComponent(iterator, Transform2D)
+        team := ECS.GetComponent(iterator, TeamID)^
 
-        minCell := GetBucketCell(Min(transform.position,
-                                     transform.position+bullet.velocity) - 2)
-        maxCell := GetBucketCell(Max(transform.position,
-                                     transform.position+bullet.velocity) + 2)
+        minCell := GetBucketCell(Min(transform.localPosition,
+                                     transform.localPosition+bullet.velocity) - 2)
+        maxCell := GetBucketCell(Max(transform.localPosition,
+                                     transform.localPosition+bullet.velocity) + 2)
         
         bucketLoop:
         for x in minCell.x .. maxCell.x {
             for y in minCell.y .. maxCell.y {
                 cell := int2{x,y}
                 
-                bucketIterator := multiMap.SetupIterator(boidBuckets, cell)
-                for multiMap.Iterate(&bucketIterator) {
+                bucketIterator := MultiMap.SetupIterator(boidBuckets, cell)
+                for MultiMap.Iterate(&bucketIterator) {
                     payload := bucketIterator.value
                     if payload.team != team {
-                        boidPos := payload.transform.position
-                        delta := boidPos - transform.position
+                        boidPos := payload.transform.localPosition
+                        delta := boidPos - transform.localPosition
                         t := Dot(delta, bullet.velocity) / SqrLength(bullet.velocity)
-                        closePoint := transform.position + bullet.velocity*t
+                        closePoint := transform.localPosition + bullet.velocity*t
                         deltaToClosePoint := closePoint - boidPos
                         if SqrLength(deltaToClosePoint) < 1 {
-                            health := ecs.GetComponent(payload.entity, Health)
+                            health := ECS.GetComponent(payload.entity, Health)
                             health.health -= 1
                             if health.health <= 0 {
-                                ecs.ScheduleEntityDeletion(payload.entity)
+                                ECS.ScheduleEntityDeletion(payload.entity)
                                 SpawnExplosion(boidPos)
                             }
                             bullet.life = 0
@@ -256,40 +269,41 @@ UpdateBullets :: proc(iterator: ^ecs.SystemIterator) {
             }
         }
 
-        transform.position += bullet.velocity
+        transform.localPosition += bullet.velocity
         bullet.life -= 1
         if bullet.life < 0 {
-            ecs.ScheduleEntityDeletion(iterator.entity)
+            ECS.ScheduleEntityDeletion(iterator.entity)
             deleteCount += 1
         }
     }
 }
 
-UpdateExplosions :: proc(iterator: ^ecs.SystemIterator) {
-    for ecs.Iterate(iterator) {
-        particle := ecs.GetComponent(iterator, ExplosionParticle)
+UpdateExplosions :: proc(iterator: ^ECS.SystemIterator) {
+    for ECS.Iterate(iterator) {
+        particle := ECS.GetComponent(iterator, ExplosionParticle)
+        transform := ECS.GetComponent(iterator, Transform2D)
         
         particle.life -= .05
-        particle.position += particle.velocity
+        transform.localPosition += particle.velocity
         particle.velocity *= .85
 
         if particle.life <= 0 {
-            ecs.ScheduleEntityDeletion(iterator.entity)
+            ECS.ScheduleEntityDeletion(iterator.entity)
         }
     }
 }
 
 ShootBullet :: proc(position: float2, rotation: f64, team: TeamID) {
-    entity := ecs.NewEntity()
-    ecs.AddComponent(entity, Transform {
-        position = position,
-        rotation = rotation,
+    entity := ECS.NewEntity()
+    ECS.AddComponent(entity, Transform2D {
+        localPosition = position,
+        localRotation = rotation,
     })
-    ecs.AddComponent(entity, Bullet {
+    ECS.AddComponent(entity, Bullet {
         velocity = GetDirection(rotation) * 10,
         life = 100,
     })
-    ecs.AddComponent(entity, team)
+    ECS.AddComponent(entity, team)
 }
 
 SpawnExplosion :: proc(position: float2) {
@@ -298,9 +312,11 @@ SpawnExplosion :: proc(position: float2) {
         speed := rand.float64() * 10
         velocity := GetDirection(angle) * speed
 
-        entity := ecs.NewEntity()
-        ecs.AddComponent(entity, ExplosionParticle {
-            position = position,
+        entity := ECS.NewEntity()
+        ECS.AddComponent(entity, Transform2D {
+            localPosition = position,
+        })
+        ECS.AddComponent(entity, ExplosionParticle {
             velocity = velocity,
             life = rand.float64_range(0.5, 1.0),
         })

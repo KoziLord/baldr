@@ -1,7 +1,8 @@
 package main
 
-import "ecs"
-import "profiler"
+import "ECS"
+import "Profiler"
+import "Transform"
 
 import "core:strings"
 import "core:fmt"
@@ -15,20 +16,20 @@ charsPerRow :: asciiWidth+1
 sb := strings.make_builder_len(charsPerRow * asciiHeight)
 heatmap : [asciiWidth * asciiHeight]int = 0
 
-collectBoidsSystem := ecs.CreateSystem({Boid, Transform}, CollectBoids)
-collectBulletsSystem := ecs.CreateSystem({Bullet, Transform}, CollectBullets)
-collectParticlesSystem := ecs.CreateSystem({ExplosionParticle}, CollectParticles)
+collectBoidsSystem := ECS.CreateSystem({Boid, Transform2D}, CollectBoids)
+collectBulletsSystem := ECS.CreateSystem({Bullet, Transform2D}, CollectBullets)
+collectParticlesSystem := ECS.CreateSystem({ExplosionParticle, Transform2D}, CollectParticles)
 
 minPos, maxPos, fieldSize: float2
 
 WriteWorldToConsole :: proc() {
-    profiler.MeasureThisScope("Render Systems")
+    Profiler.MeasureThisScope("Render Systems")
 
     heatmap = 0
 
-    ecs.RunSystem(collectBoidsSystem)
-    ecs.RunSystem(collectBulletsSystem)
-    ecs.RunSystem(collectParticlesSystem)
+    ECS.RunSystem(collectBoidsSystem)
+    ECS.RunSystem(collectBulletsSystem)
+    ECS.RunSystem(collectParticlesSystem)
 
     totalCount := 0
 
@@ -61,15 +62,17 @@ WriteWorldToConsole :: proc() {
     //fmt.printf("\nrendered boid count: %v\n", totalCount)
 }
 
-CollectBoids :: proc(iterator: ^ecs.SystemIterator) {
-    for ecs.Iterate(iterator) {
-        transform := ecs.GetComponent(iterator, Transform)
+CollectBoids :: proc(iterator: ^ECS.SystemIterator) {
+    for ECS.Iterate(iterator) {
+        transform := ECS.GetComponent(iterator, Transform2D)
+        worldPos: float2 = Transform.GetWorldPos(transform).xy
+
         if iterator.isFirstEntity {
-            minPos = transform.position
-            maxPos = transform.position
+            minPos = worldPos
+            maxPos = worldPos
         } else {
-            minPos = Min(minPos, transform.position)
-            maxPos = Max(maxPos, transform.position)
+            minPos = Min(minPos, worldPos)
+            maxPos = Max(maxPos, worldPos)
         }
     }
     
@@ -77,32 +80,32 @@ CollectBoids :: proc(iterator: ^ecs.SystemIterator) {
     maxPos += 5
     fieldSize = maxPos - minPos
 
-    ecs.ResetIterator(iterator)
+    ECS.ResetIterator(iterator)
 
-    for ecs.Iterate(iterator) {
-        transform := ecs.GetComponent(iterator, Transform)
+    for ECS.Iterate(iterator) {
+        transform := ECS.GetComponent(iterator, Transform2D)
 
-        cell := HeatmapCell(transform.position)
+        cell := HeatmapCell(Transform.GetWorldPos(transform).xy)
         heatmap[cell.y*asciiWidth + cell.x] += 1
     }
 }
 
-CollectBullets :: proc(iterator: ^ecs.SystemIterator) {
-    for ecs.Iterate(iterator) {
-        transform := ecs.GetComponent(iterator, Transform)
+CollectBullets :: proc(iterator: ^ECS.SystemIterator) {
+    for ECS.Iterate(iterator) {
+        transform := ECS.GetComponent(iterator, Transform2D)
 
-        cell, ok := HeatmapCell(transform.position)
+        cell, ok := HeatmapCell(Transform.GetWorldPos(transform).xy)
         if ok {
             heatmap[cell.y*asciiWidth + cell.x] = -1
         }
     }
 }
 
-CollectParticles :: proc(iterator: ^ecs.SystemIterator) {
-    for ecs.Iterate(iterator) {
-        particle := ecs.GetComponent(iterator, ExplosionParticle)
+CollectParticles :: proc(iterator: ^ECS.SystemIterator) {
+    for ECS.Iterate(iterator) {
+        transform := ECS.GetComponent(iterator, Transform2D)
         
-        cell, ok := HeatmapCell(particle.position)
+        cell, ok := HeatmapCell(Transform.GetWorldPos(transform).xy)
         if ok {
             heatmap[cell.y*asciiWidth + cell.x] = -2
         }

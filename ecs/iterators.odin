@@ -1,7 +1,7 @@
-package ecs
+package ECS
 
-import "../profiler"
-import "../multiMap"
+import "../Profiler"
+import "../MultiMap"
 
 import "core:fmt"
 

@@ -1,6 +1,6 @@
-package multiMap
+package MultiMap
 
-import "../profiler"
+import "../Profiler"
 
 import "core:hash"
 import "core:fmt"
@@ -124,8 +124,24 @@ Iterate :: proc(iterator: ^Iterator($Key, $Value)) -> bool {
     }
 }
 
+LARGE_PRIME :: 23456789
+
 @(private="file")
 GetHash :: proc(key: $T) -> uint {
-    bytes := mem.any_to_bytes(key)
-    return uint(hash.crc32(bytes))
+    result: uint = 0
+    keyShadow := key
+    uints := cast([^]uint)&keyShadow
+    for i in 0..size_of(T)/size_of(uint) {
+        piece := uints[i]
+        result = (result + piece) * LARGE_PRIME
+    }
+    when size_of(T)%size_of(uint) != 0 {
+        bytes := cast([^]byte)&keyShadow
+        for i in 0..<size_of(T)%size_of(uint) {
+            piece := bytes[size_of(T)/size_of(uint)*4 + i]
+            result = (result + piece) * LARGE_PRIME
+        }
+    }
+    return result
+    // return uint(hash.crc32(bytes))
 }
